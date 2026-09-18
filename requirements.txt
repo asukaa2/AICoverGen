@@ -16,7 +16,7 @@ soundfile
 --find-links https://download.pytorch.org/whl/torch_stable.html
 torchcrepe==0.0.23
 tqdm
-yt_dl
+yt_dlp
 sox
 PolUVR[gpu]; sys_platform == 'linux' or sys_platform == 'win32'
 PolUVR[cpu]; sys_platform == 'darwin'
