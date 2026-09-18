@@ -7,9 +7,9 @@ librosa
 numpy
 onnxruntime_gpu
 praat-parselmouth>=0.4.2
-pedalboard==0.7.7
+pedalboard
 pydub==0.25.1
-pyworld==0.3.4
+pyworld
 Requests
 scipy
 soundfile
