@@ -6,7 +6,6 @@ import librosa
 import numpy as np
 import os
 import parselmouth
-import pyworld
 import sys
 import torch
 import torch.nn.functional as F
@@ -24,18 +23,7 @@ bh, ah = signal.butter(N=5, Wn=48, btype="high", fs=16000)
 input_audio_path2wav = {}
 
 
-@lru_cache
-def cache_harvest_f0(input_audio_path, fs, f0max, f0min, frame_period):
-    audio = input_audio_path2wav[input_audio_path]
-    f0, t = pyworld.harvest(
-        audio,
-        fs=fs,
-        f0_ceil=f0max,
-        f0_floor=f0min,
-        frame_period=frame_period,
-    )
-    f0 = pyworld.stonemask(audio, f0, t, fs)
-    return f0
+
 
 
 def change_rms(data1, sr1, data2, sr2, rate):  # 1是输入音频，2是输出音频,rate是2的占比
@@ -164,12 +152,6 @@ class VC(object):
         f0 = f0[0].cpu().numpy()
         return f0
 
-    # Fork Feature: Compute pYIN f0 method
-    def get_f0_pyin_computation(self, x, f0_min, f0_max):
-        y, sr = librosa.load("saudio/Sidney.wav", self.sr, mono=True)
-        f0, _, _ = librosa.pyin(y, sr=self.sr, fmin=f0_min, fmax=f0_max)
-        f0 = f0[1:]  # Get rid of extra first frame
-        return f0
 
     # Fork Feature: Acquire median hybrid f0 estimation calculation
     def get_f0_hybrid_computation(
@@ -197,23 +179,7 @@ class VC(object):
         # Get f0 calculations for all methods specified
         for method in methods:
             f0 = None
-            if method == "pm":
-                f0 = (
-                    parselmouth.Sound(x, self.sr)
-                    .to_pitch_ac(
-                        time_step=time_step / 1000,
-                        voicing_threshold=0.6,
-                        pitch_floor=f0_min,
-                        pitch_ceiling=f0_max,
-                    )
-                    .selected_array["frequency"]
-                )
-                pad_size = (p_len - len(f0) + 1) // 2
-                if pad_size > 0 or p_len - len(f0) - pad_size > 0:
-                    f0 = np.pad(
-                        f0, [[pad_size, p_len - len(f0) - pad_size]], mode="constant"
-                    )
-            elif method == "crepe":
+            if method == "crepe":
                 f0 = self.get_f0_official_crepe_computation(x, f0_min, f0_max)
                 f0 = f0[1:]  # Get rid of extra first frame
             elif method == "crepe-tiny":
@@ -227,26 +193,7 @@ class VC(object):
                 f0 = self.get_f0_crepe_computation(
                     x, f0_min, f0_max, p_len, crepe_hop_length, "tiny"
                 )
-            elif method == "harvest":
-                f0 = cache_harvest_f0(input_audio_path, self.sr, f0_max, f0_min, 10)
-                if filter_radius > 2:
-                    f0 = signal.medfilt(f0, 3)
-                f0 = f0[1:]  # Get rid of first frame.
-            elif method == "dio":  # Potentially buggy?
-                f0, t = pyworld.dio(
-                    x.astype(np.double),
-                    fs=self.sr,
-                    f0_ceil=f0_max,
-                    f0_floor=f0_min,
-                    frame_period=10,
-                )
-                f0 = pyworld.stonemask(x.astype(np.double), f0, t, self.sr)
-                f0 = signal.medfilt(f0, 3)
-                f0 = f0[1:]
-            # elif method == "pyin": Not Working just yet
-            #    f0 = self.get_f0_pyin_computation(x, f0_min, f0_max)
-            # Push method to the stack
-            f0_computation_stack.append(f0)
+            
 
         for fc in f0_computation_stack:
             print(len(fc))
@@ -276,38 +223,7 @@ class VC(object):
         f0_max = 1100
         f0_mel_min = 1127 * np.log(1 + f0_min / 700)
         f0_mel_max = 1127 * np.log(1 + f0_max / 700)
-        if f0_method == "pm":
-            f0 = (
-                parselmouth.Sound(x, self.sr)
-                .to_pitch_ac(
-                    time_step=time_step / 1000,
-                    voicing_threshold=0.6,
-                    pitch_floor=f0_min,
-                    pitch_ceiling=f0_max,
-                )
-                .selected_array["frequency"]
-            )
-            pad_size = (p_len - len(f0) + 1) // 2
-            if pad_size > 0 or p_len - len(f0) - pad_size > 0:
-                f0 = np.pad(
-                    f0, [[pad_size, p_len - len(f0) - pad_size]], mode="constant"
-                )
-        elif f0_method == "harvest":
-            input_audio_path2wav[input_audio_path] = x.astype(np.double)
-            f0 = cache_harvest_f0(input_audio_path, self.sr, f0_max, f0_min, 10)
-            if filter_radius > 2:
-                f0 = signal.medfilt(f0, 3)
-        elif f0_method == "dio":  # Potentially Buggy?
-            f0, t = pyworld.dio(
-                x.astype(np.double),
-                fs=self.sr,
-                f0_ceil=f0_max,
-                f0_floor=f0_min,
-                frame_period=10,
-            )
-            f0 = pyworld.stonemask(x.astype(np.double), f0, t, self.sr)
-            f0 = signal.medfilt(f0, 3)
-        elif f0_method == "crepe":
+        if f0_method == "crepe":
             f0 = self.get_f0_official_crepe_computation(x, f0_min, f0_max)
         elif f0_method == "crepe-tiny":
             f0 = self.get_f0_official_crepe_computation(x, f0_min, f0_max, "tiny")
