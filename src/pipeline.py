@@ -1,5 +1,6 @@
 from functools import lru_cache
 from time import time as ttime
+from lib.rmvpe import RMVPE
 
 import faiss
 import librosa
@@ -237,8 +238,7 @@ class VC(object):
             )
         elif f0_method == "rmvpe":
             if hasattr(self, "model_rmvpe") == False:
-                from rmvpe import RMVPE
-
+                
                 self.model_rmvpe = RMVPE(
                     os.path.join(BASE_DIR, 'rvc_models', 'rmvpe.pt'), is_half=self.is_half, device=self.device
                 )
