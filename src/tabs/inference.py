@@ -1,4 +1,4 @@
-from gradio import gr
+import gradio as gr 
 import os
 from core import song_cover_pipeline
 
