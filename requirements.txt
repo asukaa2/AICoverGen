@@ -1,7 +1,7 @@
 deemix
 faiss-cpu>=1.7.3
 ffmpeg-python>=0.2.0
-git+https://github.com/asukaa2/gradio1
+git+https://github.com/asukaa2/gradio
 lib
 librosa
 numpy
