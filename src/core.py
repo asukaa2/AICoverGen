@@ -5,10 +5,7 @@ import json
 import os
 import shlex
 import subprocess
-from contextlib import suppress
-from urllib.parse import urlparse, parse_qs
-
-import gradio as gr
+from my_utils import raise_exception, display_progress, get_youtube_video_id
 import librosa
 import numpy as np
 import soundfile as sf
@@ -30,36 +27,6 @@ rvc_models_dir = os.path.join(BASE_DIR, 'rvc_models')
 output_dir = os.path.join(BASE_DIR, 'song_output')
 
 
-def get_youtube_video_id(url, ignore_playlist=True):
-    """
-    Examples:
-    http://youtu.be/SA2iWivDJiE
-    http://www.youtube.com/watch?v=_oPAwA_Udwc&feature=feedu
-    http://www.youtube.com/embed/SA2iWivDJiE
-    http://www.youtube.com/v/SA2iWivDJiE?version=3&amp;hl=en_US
-    """
-    query = urlparse(url)
-    if query.hostname == 'youtu.be':
-        if query.path[1:] == 'watch':
-            return query.query[2:]
-        return query.path[1:]
-
-    if query.hostname in {'www.youtube.com', 'youtube.com', 'music.youtube.com'}:
-        if not ignore_playlist:
-            # use case: get playlist id not current video in playlist
-            with suppress(KeyError):
-                return parse_qs(query.query)['list'][0]
-        if query.path == '/watch':
-            return parse_qs(query.query)['v'][0]
-        if query.path[:7] == '/watch/':
-            return query.path.split('/')[1]
-        if query.path[:7] == '/embed/':
-            return query.path.split('/')[2]
-        if query.path[:3] == '/v/':
-            return query.path.split('/')[2]
-
-    # returns None for invalid YouTube url
-    return None
 
 
 def yt_download(link):
@@ -154,8 +121,28 @@ def get_hash(filepath):
 
 
 
+def add_audio_effects(audio_path, reverb_rm_size, reverb_wet, reverb_dry, reverb_damping):
+    output_path = f'{os.path.splitext(audio_path)[0]}_mixed.wav'
 
+    # Initialize audio effects plugins
+    board = Pedalboard(
+        [
+            HighpassFilter(),
+            Compressor(ratio=4, threshold_db=-15),
+            Reverb(room_size=reverb_rm_size, dry_level=reverb_dry, wet_level=reverb_wet, damping=reverb_damping)
+         ]
+    )
 
+    with AudioFile(audio_path) as f:
+        with AudioFile(output_path, 'w', f.samplerate, f.num_channels) as o:
+            # Read one second of audio at a time, until the file is empty:
+            while f.tell() < f.frames:
+                chunk = f.read(int(f.samplerate))
+                effected = board(chunk, f.samplerate, reset=False)
+                o.write(effected)
+
+    return output_path
+    
 def preprocess_song(song_input, mdx_model_params, song_id, is_webui, input_type, progress=None):
     keep_orig = False
     if input_type == 'yt':
@@ -196,27 +183,7 @@ def voice_change(voice_model, vocals_path, output_path, pitch_change, f0_method,
     gc.collect()
 
 
-def add_audio_effects(audio_path, reverb_rm_size, reverb_wet, reverb_dry, reverb_damping):
-    output_path = f'{os.path.splitext(audio_path)[0]}_mixed.wav'
 
-    # Initialize audio effects plugins
-    board = Pedalboard(
-        [
-            HighpassFilter(),
-            Compressor(ratio=4, threshold_db=-15),
-            Reverb(room_size=reverb_rm_size, dry_level=reverb_dry, wet_level=reverb_wet, damping=reverb_damping)
-         ]
-    )
-
-    with AudioFile(audio_path) as f:
-        with AudioFile(output_path, 'w', f.samplerate, f.num_channels) as o:
-            # Read one second of audio at a time, until the file is empty:
-            while f.tell() < f.frames:
-                chunk = f.read(int(f.samplerate))
-                effected = board(chunk, f.samplerate, reset=False)
-                o.write(effected)
-
-    return output_path
 
 
 def combine_audio(audio_paths, output_path, main_gain, backup_gain, inst_gain, output_format):
