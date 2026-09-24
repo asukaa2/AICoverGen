@@ -20,24 +20,20 @@ if __name__ == '__main__':
     parser.add_argument('--listen-port', type=int, help='The listening port that the server will use.')
     args = parser.parse_args()
 
-    
     with gr.Blocks(title='AICoverGenWebUI') as app:
 
-        gr.Label('AICoverGen WebUI created with ❤️', show_label=False)
+        gr.Markdown('AICoverGen WebUI created with ❤️')
 
-        # main tab
         with gr.Tab("Generate"):
             generate_tab()
-                            
-            
-        # Download tab
+
         with gr.Tab('Download model'):
             download_tab()
 
-            
     app.launch(
         share=args.share_enabled,
-        enable_queue=True,
-        server_name=None if not args.listen else (args.listen_host or '0.0.0.0'),
+        server_name="0.0.0.0" if args.listen else (args.listen_host or "127.0.0.1"),
         server_port=args.listen_port,
+        show_error=True,
+        inbrowser=False,
     )
