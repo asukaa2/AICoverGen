@@ -1,6 +1,19 @@
 import ffmpeg
 import numpy as np
+import gradio as gr
 
+
+def raise_exception(error_msg, is_webui):
+    if is_webui:
+        raise gr.Error(error_msg)
+    else:
+        raise Exception(error_msg)
+
+def display_progress(message, percent, is_webui, progress=None):
+    if is_webui:
+        progress(percent, desc=message)
+    else:
+        print(message)
 
 def load_audio(file, sr):
     try:
