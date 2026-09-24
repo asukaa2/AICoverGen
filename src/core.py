@@ -5,7 +5,6 @@ import json
 import os
 import shlex
 import subprocess
-from my_utils import raise_exception, display_progress, get_youtube_video_id
 import librosa
 import numpy as np
 import soundfile as sf
@@ -15,12 +14,17 @@ from pedalboard import Pedalboard, Reverb, Compressor, HighpassFilter
 from pedalboard.io import AudioFile
 from pydub import AudioSegment
 
-from mdx import run_mdx
-from rvc import Config, load_hubert, get_vc, rvc_infer
+
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 now_dir = os.path.join(BASE_DIR, 'src')
 sys.path.append(now_dir)
+
+
+from mdx import run_mdx
+from rvc import Config, load_hubert, get_vc, rvc_infer
+from my_utils import raise_exception, display_progress, get_youtube_video_id
+
 
 mdxnet_models_dir = os.path.join(BASE_DIR, 'mdxnet_models')
 rvc_models_dir = os.path.join(BASE_DIR, 'rvc_models')
