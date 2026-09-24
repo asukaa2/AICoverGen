@@ -80,11 +80,6 @@ def yt_download(link):
     return download_path
 
 
-def raise_exception(error_msg, is_webui):
-    if is_webui:
-        raise gr.Error(error_msg)
-    else:
-        raise Exception(error_msg)
 
 
 def get_rvc_model(voice_model, is_webui):
@@ -158,11 +153,7 @@ def get_hash(filepath):
     return file_hash.hexdigest()[:11]
 
 
-def display_progress(message, percent, is_webui, progress=None):
-    if is_webui:
-        progress(percent, desc=message)
-    else:
-        print(message)
+
 
 
 def preprocess_song(song_input, mdx_model_params, song_id, is_webui, input_type, progress=None):
