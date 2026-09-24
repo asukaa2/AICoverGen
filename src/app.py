@@ -20,9 +20,9 @@ if __name__ == '__main__':
     parser.add_argument('--listen-port', type=int, help='The listening port that the server will use.')
     args = parser.parse_args()
 
-    with gr.Blocks(title='AICoverGenWebUI') as app:
+    with gr.Blocks(title='CoverGen') as app:
 
-        gr.Markdown('AICoverGen WebUI created with ❤️')
+        gr.Markdown('CoverGen created with ❤️')
 
         with gr.Tab("Generate"):
             generate_tab()
