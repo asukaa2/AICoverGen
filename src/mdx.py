@@ -45,7 +45,6 @@ class MDXModel:
     def istft(self, x, freq_pad=None):
         freq_pad = self.freq_pad.repeat([x.shape[0], 1, 1, 1]) if freq_pad is None else freq_pad
         x = torch.cat([x, freq_pad], -2)
-        # c = 4*2 if self.target_name=='*' else 2
         x = x.reshape([-1, 2, 2, self.n_bins, self.dim_t]).reshape([-1, 2, self.n_bins, self.dim_t])
         x = x.permute([0, 2, 3, 1])
         x = x.contiguous()
@@ -56,66 +55,45 @@ class MDXModel:
 
 class MDX:
     DEFAULT_SR = 44100
-    # Unit: seconds
     DEFAULT_CHUNK_SIZE = 0 * DEFAULT_SR
     DEFAULT_MARGIN_SIZE = 1 * DEFAULT_SR
-
     DEFAULT_PROCESSOR = 0
 
     def __init__(self, model_path: str, params: MDXModel, processor=DEFAULT_PROCESSOR):
-
-        # Set the device and the provider (CPU or CUDA)
         self.device = torch.device(f'cuda:{processor}') if processor >= 0 else torch.device('cpu')
         self.provider = ['CUDAExecutionProvider'] if processor >= 0 else ['CPUExecutionProvider']
 
         self.model = params
-
-        # Load the ONNX model using ONNX Runtime
         self.ort = ort.InferenceSession(model_path, providers=self.provider)
-        # Preload the model for faster performance
         self.ort.run(None, {'input': torch.rand(1, 4, params.dim_f, params.dim_t).numpy()})
         self.process = lambda spec: self.ort.run(None, {'input': spec.cpu().numpy()})[0]
 
         self.prog = None
+        self._prog_lock = threading.Lock()
 
     @staticmethod
     def get_hash(model_path):
         try:
             with open(model_path, 'rb') as f:
-                f.seek(- 10000 * 1024, 2)
+                f.seek(-10000 * 1024, 2)
                 model_hash = hashlib.md5(f.read()).hexdigest()
-        except:
+        except Exception:
             model_hash = hashlib.md5(open(model_path, 'rb').read()).hexdigest()
-
         return model_hash
 
     @staticmethod
     def segment(wave, combine=True, chunk_size=DEFAULT_CHUNK_SIZE, margin_size=DEFAULT_MARGIN_SIZE):
-        """
-        Segment or join segmented wave array
-
-        Args:
-            wave: (np.array) Wave array to be segmented or joined
-            combine: (bool) If True, combines segmented wave array. If False, segments wave array.
-            chunk_size: (int) Size of each segment (in samples)
-            margin_size: (int) Size of margin between segments (in samples)
-
-        Returns:
-            numpy array: Segmented or joined wave array
-        """
-
         if combine:
-            processed_wave = None  # Initializing as None instead of [] for later numpy array concatenation
+            processed_wave = None
             for segment_count, segment in enumerate(wave):
                 start = 0 if segment_count == 0 else margin_size
                 end = None if segment_count == len(wave) - 1 else -margin_size
                 if margin_size == 0:
                     end = None
-                if processed_wave is None:  # Create array for first segment
+                if processed_wave is None:
                     processed_wave = segment[:, start:end]
-                else:  # Concatenate to existing array for subsequent segments
+                else:
                     processed_wave = np.concatenate((processed_wave, segment[:, start:end]), axis=-1)
-
         else:
             processed_wave = []
             sample_count = wave.shape[-1]
@@ -127,7 +105,6 @@ class MDX:
                 margin_size = chunk_size
 
             for segment_count, skip in enumerate(range(0, sample_count, chunk_size)):
-
                 margin = 0 if segment_count == 0 else margin_size
                 end = min(skip + chunk_size + margin_size, sample_count)
                 start = skip - margin
@@ -141,24 +118,11 @@ class MDX:
         return processed_wave
 
     def pad_wave(self, wave):
-        """
-        Pad the wave array to match the required chunk size
-
-        Args:
-            wave: (np.array) Wave array to be padded
-
-        Returns:
-            tuple: (padded_wave, pad, trim)
-                - padded_wave: Padded wave array
-                - pad: Number of samples that were padded
-                - trim: Number of samples that were trimmed
-        """
         n_sample = wave.shape[1]
         trim = self.model.n_fft // 2
         gen_size = self.model.chunk_size - 2 * trim
         pad = gen_size - n_sample % gen_size
 
-        # Padded wave
         wave_p = np.concatenate((np.zeros((2, trim)), wave, np.zeros((2, pad)), np.zeros((2, trim))), 1)
 
         mix_waves = []
@@ -171,24 +135,12 @@ class MDX:
         return mix_waves, pad, trim
 
     def _process_wave(self, mix_waves, trim, pad, q: queue.Queue, _id: int):
-        """
-        Process each wave segment in a multi-threaded environment
-
-        Args:
-            mix_waves: (torch.Tensor) Wave segments to be processed
-            trim: (int) Number of samples trimmed during padding
-            pad: (int) Number of samples padded during padding
-            q: (queue.Queue) Queue to hold the processed wave segments
-            _id: (int) Identifier of the processed wave segment
-
-        Returns:
-            numpy array: Processed wave segment
-        """
         mix_waves = mix_waves.split(1)
         with torch.no_grad():
             pw = []
             for mix_wave in mix_waves:
-                self.prog.update()
+                with self._prog_lock:
+                    self.prog.update()
                 spec = self.model.stft(mix_wave)
                 processed_spec = torch.tensor(self.process(spec))
                 processed_wav = self.model.istft(processed_spec.to(self.device))
@@ -199,32 +151,27 @@ class MDX:
         return processed_signal
 
     def process_wave(self, wave: np.array, mt_threads=1):
-        """
-        Process the wave array in a multi-threaded environment
-
-        Args:
-            wave: (np.array) Wave array to be processed
-            mt_threads: (int) Number of threads to be used for processing
-
-        Returns:
-            numpy array: Processed wave array
-        """
-        self.prog = tqdm(total=0)
         chunk = wave.shape[-1] // mt_threads
         waves = self.segment(wave, False, chunk)
 
-        # Create a queue to hold the processed wave segments
-        q = queue.Queue()
-        threads = []
-        for c, batch in enumerate(waves):
+        # Count total chunks across all batches to size the progress bar accurately
+        total_chunks = 0
+        prepared = []
+        for batch in waves:
             mix_waves, pad, trim = self.pad_wave(batch)
-            self.prog.total = len(mix_waves) * mt_threads
-            thread = threading.Thread(target=self._process_wave, args=(mix_waves, trim, pad, q, c))
-            thread.start()
-            threads.append(thread)
-        for thread in threads:
-            thread.join()
-        self.prog.close()
+            prepared.append((mix_waves, pad, trim))
+            total_chunks += mix_waves.shape[0]
+
+        with tqdm(total=total_chunks, desc="MDX", unit="chunk", dynamic_ncols=True) as prog:
+            self.prog = prog
+            q = queue.Queue()
+            threads = []
+            for c, (mix_waves, pad, trim) in enumerate(prepared):
+                thread = threading.Thread(target=self._process_wave, args=(mix_waves, trim, pad, q, c))
+                thread.start()
+                threads.append(thread)
+            for thread in threads:
+                thread.join()
 
         processed_batches = []
         while not q.empty():
@@ -255,7 +202,6 @@ def run_mdx(model_params, output_dir, model_path, filename, exclude_main=False, 
 
     mdx_sess = MDX(model_path, model)
     wave, sr = librosa.load(filename, mono=False, sr=44100)
-    # normalizing input wave gives better output
     peak = max(np.max(wave), abs(np.min(wave)))
     wave /= peak
     if denoise:
@@ -263,7 +209,6 @@ def run_mdx(model_params, output_dir, model_path, filename, exclude_main=False, 
         wave_processed *= 0.5
     else:
         wave_processed = mdx_sess.process_wave(wave, m_threads)
-    # return to previous peak
     wave_processed *= peak
     stem_name = model.stem_name if suffix is None else suffix
 
